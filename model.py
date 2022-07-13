@@ -1,3 +1,4 @@
+from os import link
 from graph import TrafficNetwork, Graph
 import numpy as np
 
@@ -27,9 +28,11 @@ class TrafficFlowModel:
 
         # Boolean varible: If true print the detail while iterations
         self.__detail = False
+        
 
         # Boolean varible: If true the model is solved properly
         self.__solved = False
+        self.__so_solved = False
 
         # Some variables for contemporarily storing the
         # computation result
@@ -37,6 +40,11 @@ class TrafficFlowModel:
         self.__iterations_times = None
         self.theta = theta
         self.d = d
+
+
+        # computing the system optimum 
+        self.so_max_iter = 30
+        
 
     def __insert_links_in_order(self, links):
         ''' Insert the links as the expected order into the
@@ -113,12 +121,17 @@ class TrafficFlowModel:
             to users in case they need to do some extensions based 
             on the computation result.
         '''
-        if self.__solved:
+        if self.__solved and self.__so_solved:
             link_flow = self.__final_link_flow
             link_time = self.__link_flow_to_link_time_actual(link_flow)
             path_time = self.__link_time_to_path_time(link_time)
             link_vc = link_flow / self.__link_capacity
-            return link_flow, link_time, path_time, link_vc
+            so_link_flow = self.__so_final_link_flow
+            so_link_time = self.__link_flow_to_link_time_actual(so_link_flow)
+            so_path_time = self.__link_time_to_path_time(so_link_time)
+            so_link_vc = so_link_flow / self.__link_capacity
+            poa = link_flow.dot(link_time) / so_link_flow.dot(so_link_time)
+            return poa, link_flow, link_time, path_time, link_vc, so_link_flow, so_link_time, so_path_time, so_link_vc
         else:
             return None
     
@@ -134,14 +147,14 @@ class TrafficFlowModel:
             this function can be invoked only after the
             model is solved.
         '''
-        if self.__solved:
+        if self.__solved and self.__so_solved:
             # Print the input of the model
             print(self)
             
             # Print the report
             
             # Do the computation
-            link_flow, link_time, path_time, link_vc = self._formatted_solution()
+            poa, link_flow, link_time, path_time, link_vc, so_link_flow, so_link_time, so_path_time, so_link_vc = self._formatted_solution()
 
             print(self.__dash_line())
             print("TRAFFIC FLOW ASSIGN MODEL (USER EQUILIBRIUM) \nFRANK-WOLFE ALGORITHM - REPORT OF SOLUTION")
@@ -164,6 +177,31 @@ class TrafficFlowModel:
                     print(self.__dash_line())
                 print("%2d : group= %2d, time= %8.3f, path= %s" % (i, self.__network.paths_category()[i], path_time[i], self.__network.paths()[i]))
             print(self.__dash_line())
+            print(self.__dash_line())
+            print("TRAFFIC FLOW ASSIGN MODEL (SYSTEM OPTIMUM) \nFRANK-WOLFE ALGORITHM - REPORT OF SOLUTION")
+            print(self.__dash_line())
+            print(self.__dash_line())
+            print("TIMES OF ITERATION : %d" % self.__so_iterations_times)
+            print(self.__dash_line())
+            print(self.__dash_line())
+            print("PERFORMANCE OF LINKS")
+            print(self.__dash_line())
+            for i in range(self.__network.num_of_links()):
+                print("%2d : link= %12s, flow= %8.2f, time= %8.3f, v/c= %.3f" % (i, self.__network.edges()[i], so_link_flow[i], so_link_time[i], so_link_vc[i]))
+            print(self.__dash_line())
+            print(self.__dash_line())
+            print("PERFORMANCE OF PATHS (GROUP BY ORIGIN-DESTINATION PAIR)")
+            print(self.__dash_line())
+            counter = 0
+            for i in range(self.__network.num_of_paths()):
+                if counter < self.__network.paths_category()[i]:
+                    counter = counter + 1
+                    print(self.__dash_line())
+                print("%2d : group= %2d, time= %8.3f, path= %s" % (i, self.__network.paths_category()[i], so_path_time[i], self.__network.paths()[i]))
+            print(self.__dash_line())
+            print("THE PRICE OF ANARCHY")
+            print(self.__dash_line())
+            print("PoA = {}".format(poa))
         else:
             raise ValueError("The report could be generated only after the model is solved!")
 
@@ -274,7 +312,17 @@ class TrafficFlowModel:
         '''
         val = 0
         for i in range(self.__network.num_of_links()):
-            val += self.__link_time_performance_integrated(link_flow= mixed_flow[i], t0= self.__link_free_time[i], capacity= self.__link_capacity[i])
+            val += self.__link_time_performance_integrated(link_flow=mixed_flow[i], t0=self.__link_free_time[i], capacity=self.__link_capacity[i])
+        return val
+
+    def __so_object_function(self, mixed_flow):
+        ''' Objective function in the linear search step 
+            of the optimization model of system optimum convex optimization
+             problem, the only variable is mixed_flow in this case.
+        '''
+        val = 0
+        for i in range(self.__network.num_of_links()):
+            val += mixed_flow[i] * self.__link_time_performance(link_flow=mixed_flow[i], t0=self.__link_free_time[i], capacity=self.__link_capacity[i])
         return val
 
     def __golden_section(self, link_flow, auxiliary_link_flow, accuracy= 1e-8):
@@ -296,6 +344,68 @@ class TrafficFlowModel:
         while True:
             val_left = self.__object_function((1 - leftX) * link_flow + leftX * auxiliary_link_flow)
             val_right = self.__object_function((1 - rightX) * link_flow + rightX * auxiliary_link_flow)
+            if val_left <= val_right:
+                UB = rightX
+            else:
+                LB = leftX
+            if abs(LB - UB) < accuracy:
+                opt_theta = (rightX + leftX) / 2.0
+                return opt_theta
+            else:
+                if val_left <= val_right:
+                    rightX = leftX
+                    leftX = LB + (1 - goldenPoint) * (UB - LB)
+                else:
+                    leftX = rightX
+                    rightX = LB + goldenPoint*(UB - LB)
+
+    def __so_all_or_nothing(self, link_flow):
+        ''' Perform the all-or-nothing assignment of
+            Frank-Wolfe algorithm with system optimum objective, equivalent to adding toll price to every road,
+
+            Input: link flow -> Output: new link flow
+            The input is an array.
+        '''
+        # LINK FLOW -> LINK TIME
+        link_time = self.__so_grad(link_flow)
+        # LINK TIME -> PATH TIME
+        path_time = self.__link_time_to_path_time(link_time)
+
+        # PATH TIME -> PATH FLOW
+        # Find the minimal traveling time within group 
+        # (splited by origin - destination pairs) and
+        # assign all the flow to that path
+        path_flow = np.zeros(self.__network.num_of_paths())
+        for OD_pair_index in range(self.__network.num_of_OD_pairs()):
+            indice_grouped = []
+            for path_index in range(self.__network.num_of_paths()):
+                if self.__network.paths_category()[path_index] == OD_pair_index:
+                    indice_grouped.append(path_index)
+            sub_path_time = [path_time[ind] for ind in indice_grouped]
+            min_in_group = min(sub_path_time)
+            ind_min = sub_path_time.index(min_in_group)
+            target_path_ind = indice_grouped[ind_min]
+            path_flow[target_path_ind] = self.__demand[OD_pair_index]
+            #path_flow[target_path_ind] = sum(self.__demand) * self.d[OD_pair_index]
+        if self.__detail:
+            print("Link time:\n%s" % link_time)
+            print("Path flow:\n%s" % path_flow)
+            print("Path time:\n%s" % path_time)
+        
+        # PATH FLOW -> LINK FLOW
+        new_link_flow = self.__path_flow_to_link_flow(path_flow)
+
+        return new_link_flow
+
+    def __so_golden_section(self, link_flow, auxiliary_link_flow, accuracy= 1e-8):
+        LB = 0
+        UB = 1
+        goldenPoint = 0.618
+        leftX = LB + (1 - goldenPoint) * (UB - LB)
+        rightX = LB + goldenPoint * (UB - LB)
+        while True:
+            val_left = self.__so_object_function((1 - leftX) * link_flow + leftX * auxiliary_link_flow)
+            val_right = self.__so_object_function((1 - rightX) * link_flow + rightX * auxiliary_link_flow)
             if val_left <= val_right:
                 UB = rightX
             else:
@@ -345,6 +455,75 @@ class TrafficFlowModel:
         '''
         return "-" * 80
     
+    def __so_grad(self, link_flow):
+        n_links = self.__network.num_of_links()
+        grad = np.zeros(n_links)
+        for i in range(len(link_flow)):
+            val1 = self.__link_time_performance(link_flow[i], self.__link_free_time[i], self.__link_capacity[i]) 
+            val2 = link_flow[i] * self.__link_free_time[i] * (self._alpha * ((link_flow[i]/self.__link_capacity[i])**(self._beta - 1))) / self.__link_capacity[i]
+            
+            grad[i] = val1 + val2 
+        return grad
+    
+    def so_solve(self):
+        ''' Solve the traffic flow assignment model (system optimum)
+            by Frank-Wolfe algorithm, all the necessary data must be 
+            properly input into the model in advance. 
+
+            (Implicitly) Return
+            ------
+            self.__solved = True
+        '''
+        if self.__detail:
+            print(self.__dash_line())
+            print("FLOW LATENCY ATTACKED TRAFFIC FLOW ASSIGN MODEL (System Optimum) \nFRANK-WOLFE ALGORITHM - DETAIL OF ITERATIONS")
+            print(self.__dash_line())
+            print(self.__dash_line())
+            print("Initialization")
+            print(self.__dash_line())
+        
+        # Step 0: based on the x0, generate the x1
+        empty_flow = np.zeros(self.__network.num_of_links())
+        link_flow = self.__so_all_or_nothing(empty_flow)
+
+        counter = 0
+        while True:
+            
+            if self.__detail:
+                print(self.__dash_line())
+                print("Iteration %s" % counter)
+                print(self.__dash_line())
+                print("Current link flow:\n%s" % link_flow)
+
+            # Step 1 & Step 2: Use the link flow matrix -x to generate the time, then generate the auxiliary link flow matrix -y
+            
+            auxiliary_link_flow = self.__so_all_or_nothing(link_flow)
+
+            # Step 3: Linear Search
+            opt_theta = self.__so_golden_section(link_flow, auxiliary_link_flow)
+            
+            # Step 4: Using optimal theta to update the link flow matrix
+            new_link_flow = (1 - opt_theta) * link_flow + opt_theta * auxiliary_link_flow
+
+            # Print the detail if necessary
+            if self.__detail:
+                print("Optimal theta: %.8f" % opt_theta)
+                print("Auxiliary link flow:\n%s" % auxiliary_link_flow)
+
+            # Step 5: Check the Convergence, if FALSE, then return to Step 1
+            if self.__is_convergent(link_flow, new_link_flow):
+                if self.__detail:
+                    print(self.__dash_line())
+                self.__so_solved = True
+                self.__so_final_link_flow = new_link_flow
+                self.__so_iterations_times = counter
+                break
+            else:
+                link_flow = new_link_flow
+                counter += 1
+
+    
+
     def __str__(self):
         string = ""
         string += self.__dash_line()

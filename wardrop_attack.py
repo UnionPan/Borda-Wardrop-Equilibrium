@@ -5,9 +5,10 @@ import networkx as nx
 import numpy as np
 from model import TrafficFlowModel
 from sioux_falls_data import Net
+import matplotlib.pyplot as plt
 
-ATKITER = 5
-M = 3
+ATKITER = 30
+M = 5
 
 def proj(a, y):
      
@@ -96,26 +97,30 @@ class Wardrop_atksurf:
 
     def attk_iter(self):
         
-        avg_time = []
+        poa_list= []
         flow_res = []
         path_res = []
         link_vc_res = []
+        self.eqform.so_solve()
         for i in range(ATKITER):
             print('Attacking iteration {}'.format(i+1))
+            
             theta_grad, d_grad = self.atk_grad()
             self.theta -= self.lr * theta_grad
             self.d -= self.lr * d_grad
             self.stealthy_projection()
-            link_flow, link_time, path_time, link_vc = self.eqform._formatted_solution()
+            # sample the next iteration Wardrop equilibrium and obtain the value
+            poa, link_flow, link_time, path_time, link_vc, so_link_flow, so_link_time, so_path_time, so_link_vc = self.wardrop_formation(self.theta, self.d)
+
             print(link_flow)
             print('------------')
             print(link_time)
-            avg_time.append(link_flow.dot(link_time))
+            poa_list.append(poa)
             flow_res.append(link_flow)
             path_res.append(np.mean(path_time))
             link_vc_res.append(link_vc)
             
-        return avg_time, flow_res, path_res, link_vc_res 
+        return poa_list, flow_res, path_res, link_vc_res 
 
     def stealthy_projection(self):
         if not self.isstealthy():
@@ -155,18 +160,18 @@ class Wardrop_atksurf:
 
             # get the performance results after perturbing theta
             stackelberg_res_theta = self.wardrop_formation(pert_theta_proj, self.d)
-            pert_theta_avgtime = stackelberg_res_theta[0].dot(stackelberg_res_theta[1]) / self.total_demand
+            pert_theta_avgtime = stackelberg_res_theta[1].dot(stackelberg_res_theta[2]) / self.total_demand
             
             # get the performance results after perturbing d
             stackelberg_res_d = self.wardrop_formation(self.theta, pert_d_proj)
-            pert_d_avgtime = stackelberg_res_d[0].dot(stackelberg_res_d[1]) / self.total_demand
+            pert_d_avgtime = stackelberg_res_d[1].dot(stackelberg_res_d[2]) / self.total_demand
 
             # approximate the gradient using the product between system 
             perf_theta += U_i_theta * pert_theta_avgtime
             perf_d += U_i_d * pert_d_avgtime
              
-        theta_grad = self.theta - np.eye(self.network.num_of_links) - perf_theta / M
-        d_grad = self.d - (self.od_demand / self.total_demand) - perf_d / M
+        theta_grad = self.theta - np.eye(self.network.num_of_links) - self.gamma * perf_theta / M
+        d_grad = self.d - (self.od_demand / self.total_demand) - self.gamma * perf_d / M
         return theta_grad, d_grad
 
 
@@ -175,5 +180,13 @@ if __name__ == "__main__":
     sfnet = Net()
     attacker = Wardrop_atksurf(sfnet)
     data = attacker.attk_iter()
+    fig, ax = plt.subplots()
     print(data[0])
+    ax.plot(np.arange(0,len(data[0]),1), data[0])
+    ax.set_title("the PoA evolution")
+    ax.set_xlabel("Attack iterations")
+    ax.set_ylabel("PoA")
+    plt.grid()
+    plt.show()
+    
     
