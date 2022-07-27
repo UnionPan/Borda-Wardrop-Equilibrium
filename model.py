@@ -24,26 +24,31 @@ class TrafficFlowModel:
         self._beta = 4 
 
         # Convergent criterion
-        self._conv_accuracy = 1e-3
+        self._conv_accuracy = 3e-3
 
         # Boolean varible: If true print the detail while iterations
         self.__detail = False
         
 
-        # Boolean varible: If true the model is solved properly
+        # Boolean varible: If true the model is solved properly with respect to the WE and SO
         self.__solved = False
         self.__so_solved = False
 
         # Some variables for contemporarily storing the
-        # computation result
+        # computation results for both Wardrop equilibrium and system optimum
         self.__final_link_flow = None
+        self.__final_link_time = None 
+        self.so_final_link_flow = None
+        self.so_final_link_time = None
         self.__iterations_times = None
+        self.__so_iterations_times = None
+
+        #stealthy modification parameter from the attacker
         self.theta = theta
         self.d = d
 
 
-        # computing the system optimum 
-        self.so_max_iter = 30
+        #self.so_max_iter = 30
         
 
     def __insert_links_in_order(self, links):
@@ -107,6 +112,7 @@ class TrafficFlowModel:
                     print(self.__dash_line())
                 self.__solved = True
                 self.__final_link_flow = new_link_flow
+                self.__final_link_time = self.__link_flow_to_link_time_actual(self.__final_link_flow)
                 self.__iterations_times = counter
                 break
             else:
@@ -121,17 +127,36 @@ class TrafficFlowModel:
             to users in case they need to do some extensions based 
             on the computation result.
         '''
-        if self.__solved and self.__so_solved:
+        if self.__solved:
             link_flow = self.__final_link_flow
-            link_time = self.__link_flow_to_link_time_actual(link_flow)
+            link_time = self.__final_link_time
             path_time = self.__link_time_to_path_time(link_time)
             link_vc = link_flow / self.__link_capacity
-            so_link_flow = self.__so_final_link_flow
-            so_link_time = self.__link_flow_to_link_time_actual(so_link_flow)
+            
+            return link_flow, link_time, path_time, link_vc
+        else:
+            return None
+
+    def so_formatted_solution(self):
+        '''
+           According to the link flow obtained from so_solve,
+           generate a tuple which contains four elements:
+           'so_link_flow', 'so_link_time', 'path 
+        '''
+
+        if self.__so_solved:
+            so_link_flow = self.so_final_link_flow
+            so_link_time = self.so_final_link_time
             so_path_time = self.__link_time_to_path_time(so_link_time)
             so_link_vc = so_link_flow / self.__link_capacity
-            poa = link_flow.dot(link_time) / so_link_flow.dot(so_link_time)
-            return poa, link_flow, link_time, path_time, link_vc, so_link_flow, so_link_time, so_path_time, so_link_vc
+            return so_link_flow, so_link_time, so_path_time, so_link_vc    
+        else:
+            return None
+
+    def price_of_anarchy(self):
+        if self.__so_solved and self.__solved:
+            poa = self.__final_link_flow.dot(self.__final_link_time) / self.so_final_link_flow.dot(self.so_final_link_time)
+            return poa
         else:
             return None
     
@@ -154,7 +179,7 @@ class TrafficFlowModel:
             # Print the report
             
             # Do the computation
-            poa, link_flow, link_time, path_time, link_vc, so_link_flow, so_link_time, so_path_time, so_link_vc = self._formatted_solution()
+            link_flow, link_time, path_time, link_vc = self._formatted_solution()
 
             print(self.__dash_line())
             print("TRAFFIC FLOW ASSIGN MODEL (USER EQUILIBRIUM) \nFRANK-WOLFE ALGORITHM - REPORT OF SOLUTION")
@@ -177,6 +202,8 @@ class TrafficFlowModel:
                     print(self.__dash_line())
                 print("%2d : group= %2d, time= %8.3f, path= %s" % (i, self.__network.paths_category()[i], path_time[i], self.__network.paths()[i]))
             print(self.__dash_line())
+
+            so_link_flow, so_link_time, so_path_time, so_link_vc = self.so_formatted_solution()
             print(self.__dash_line())
             print("TRAFFIC FLOW ASSIGN MODEL (SYSTEM OPTIMUM) \nFRANK-WOLFE ALGORITHM - REPORT OF SOLUTION")
             print(self.__dash_line())
@@ -198,6 +225,9 @@ class TrafficFlowModel:
                     counter = counter + 1
                     print(self.__dash_line())
                 print("%2d : group= %2d, time= %8.3f, path= %s" % (i, self.__network.paths_category()[i], so_path_time[i], self.__network.paths()[i]))
+            print(self.__dash_line())
+
+            poa = self.price_of_anarchy()
             print(self.__dash_line())
             print("THE PRICE OF ANARCHY")
             print(self.__dash_line())
@@ -236,7 +266,8 @@ class TrafficFlowModel:
             ind_min = sub_path_time.index(min_in_group)
             target_path_ind = indice_grouped[ind_min]
             path_flow[target_path_ind] = self.__demand[OD_pair_index]
-            path_flow[target_path_ind] = sum(self.__demand) * self.d[OD_pair_index]
+            #path_flow[target_path_ind] = sum(self.__demand) * self.d[OD_pair_index]
+            path_flow[target_path_ind] = self.d.dot(self.__demand)[OD_pair_index] 
         if self.__detail:
             print("Link time:\n%s" % link_time)
             print("Path flow:\n%s" % path_flow)
@@ -515,7 +546,8 @@ class TrafficFlowModel:
                 if self.__detail:
                     print(self.__dash_line())
                 self.__so_solved = True
-                self.__so_final_link_flow = new_link_flow
+                self.so_final_link_flow = new_link_flow
+                self.so_final_link_time = self.__link_flow_to_link_time_actual(self.so_final_link_flow)
                 self.__so_iterations_times = counter
                 break
             else:
