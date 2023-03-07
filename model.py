@@ -24,7 +24,11 @@ class TrafficFlowModel:
         self._beta = 4 
 
         # Convergent criterion
+<<<<<<< HEAD
         self._conv_accuracy = 3e-3
+=======
+        self._conv_accuracy = 1e-8
+>>>>>>> 981e6a6 (debug)
 
         # Boolean varible: If true print the detail while iterations
         self.__detail = False
@@ -61,7 +65,7 @@ class TrafficFlowModel:
         for link in links:
             self.__network.add_edge(link)
         
-    def solve(self):
+    def solve(self, initial_flow=None, Learning=True):
         ''' Solve the traffic flow assignment model (user equilibrium)
             by Frank-Wolfe algorithm, all the necessary data must be 
             properly input into the model in advance. 
@@ -81,7 +85,13 @@ class TrafficFlowModel:
         # Step 0: based on the x0, generate the x1
         empty_flow = np.zeros(self.__network.num_of_links())
         link_flow = self.__all_or_nothing_assign(empty_flow)
+        flag = False
+        if initial_flow is not None:
+            flag = True
+            link_flow =  self.__path_flow_to_link_flow(initial_flow)
 
+        flows = []
+        potentials = []
         counter = 0
         while True:
             
@@ -94,20 +104,27 @@ class TrafficFlowModel:
             # Step 1 & Step 2: Use the link flow matrix -x to generate the time, then generate the auxiliary link flow matrix -y
             
             auxiliary_link_flow = self.__all_or_nothing_assign(link_flow)
-
-            # Step 3: Linear Search
-            opt_theta = self.__golden_section(link_flow, auxiliary_link_flow)
             
+            potential = self.__object_function(link_flow)
+            potentials.append(potential)
+            flows.append(link_flow)
+            # Step 3: Linear Search
+            if Learning == True:
+                opt_theta = self.__golden_section(link_flow, auxiliary_link_flow)
+            else:
+                opt_theta = 0.8 #* (counter + 1) ** (-0.75)
+            #opt_theta = 0.1 * (counter+1) ** (-1.2)
             # Step 4: Using optimal theta to update the link flow matrix
             new_link_flow = (1 - opt_theta) * link_flow + opt_theta * auxiliary_link_flow
-
+            #print(np.sum(new_link_flow))
             # Print the detail if necessary
             if self.__detail:
                 print("Optimal theta: %.8f" % opt_theta)
                 print("Auxiliary link flow:\n%s" % auxiliary_link_flow)
 
             # Step 5: Check the Convergence, if FALSE, then return to Step 1
-            if self.__is_convergent(link_flow, new_link_flow):
+            #if self.__is_convergent(link_flow, new_link_flow) and counter >= 30:
+            if (counter >= 29 and flag == False) or (counter >=70 and flag == True):
                 if self.__detail:
                     print(self.__dash_line())
                 self.__solved = True
@@ -118,6 +135,88 @@ class TrafficFlowModel:
             else:
                 link_flow = new_link_flow
                 counter += 1
+        
+        return potentials, flows
+
+    def exp_weight(self, initial_flow, iter):
+        ''' Solve the traffic flow assignment model (user equilibrium)
+            by EXP algorithm, all the necessary data must be 
+            properly input into the model in advance. 
+
+            (Implicitly) Return
+            ------
+            self.__solved = True
+        '''
+        if self.__detail:
+            print(self.__dash_line())
+            print("FLOW LATENCY ATTACKED TRAFFIC FLOW ASSIGN MODEL (USER EQUILIBRIUM) \nEXP3 ALGORITHM - DETAIL OF ITERATIONS")
+            print(self.__dash_line())
+            print(self.__dash_line())
+            print("Initialization")
+            print(self.__dash_line())
+
+        path_flow = initial_flow
+        link_flow = self.__path_flow_to_link_flow(path_flow)
+        
+        #print("the initial link_flow{}".format(link_flow))
+
+        potentials = []
+
+        for t in range(iter):
+
+            eta = 1e-5 * (t+1) ** (-1)
+
+            if self.__detail:
+                print(self.__dash_line())
+                print("Iteration %s" % t)
+                print(self.__dash_line())
+                print("Current link flow:\n%s" % link_flow)
+                print("Current path flow:\n%s" % path_flow)
+            
+            
+            potential = self.__object_function(link_flow)
+            potentials.append(potential)
+           
+            link_time = self.__link_flow_to_link_time_actual(link_flow)
+            print("the link time is {} ". format(link_time))
+            latency_feedback = self.__link_time_to_path_time(link_time)
+            print("the latency is {} ". format(latency_feedback))
+            new_path_flow = self.soft_max(path_flow, latency_feedback, eta)
+            
+            link_flow = self.__path_flow_to_link_flow(new_path_flow)
+            print("the link flow is {} ".format(link_flow))
+
+            path_flow = new_path_flow
+
+            if self.__detail: 
+                print("Learning Rate {}".format(eta))
+                print("Current Beckmann Potential: {}".format(potential))
+
+        
+        return potentials 
+
+    def soft_max(self, path_flow, latency_feedback, eta):
+        print("latency_feedback is")
+        print(latency_feedback)
+        new_path_flow = np.zeros(self.__network.num_of_paths())
+        unnormalized =  path_flow * np.exp( - eta * latency_feedback)
+        
+        print(unnormalized)
+        print('after')
+        
+
+        for OD_pair_index in  range(self.__network.num_of_OD_pairs()):
+            indice_grouped = []
+            for path_index in range(self.__network.num_of_paths()):
+                if self.__network.paths_category()[path_index] == OD_pair_index:
+                    indice_grouped.append(path_index) 
+            #print(unnormalized[indice_grouped])
+            #print(np.sum(unnormalized[indice_grouped]))
+            new_path_flow[indice_grouped] = self.__demand[OD_pair_index] * unnormalized[indice_grouped] / np.sum(unnormalized[indice_grouped])
+        print(new_path_flow)
+        return new_path_flow
+
+
 
     def _formatted_solution(self):
         ''' According to the link flow we obtained in `solve`,
@@ -247,7 +346,7 @@ class TrafficFlowModel:
             The input is an array.
         '''
         # LINK FLOW -> LINK TIME
-        link_time = self.__link_flow_to_link_time(link_flow)
+        link_time = self.__link_flow_to_link_time_actual(link_flow)
         # LINK TIME -> PATH TIME
         path_time = self.__link_time_to_path_time(link_time)
 
@@ -265,9 +364,14 @@ class TrafficFlowModel:
             min_in_group = min(sub_path_time)
             ind_min = sub_path_time.index(min_in_group)
             target_path_ind = indice_grouped[ind_min]
+<<<<<<< HEAD
             path_flow[target_path_ind] = self.__demand[OD_pair_index]
             #path_flow[target_path_ind] = sum(self.__demand) * self.d[OD_pair_index]
             path_flow[target_path_ind] = self.d.dot(self.__demand)[OD_pair_index] 
+=======
+            path_flow[target_path_ind] = self.__demand[OD_pair_index] 
+            #path_flow[target_path_ind] = sum(self.__demand) * self.d[OD_pair_index]
+>>>>>>> 981e6a6 (debug)
         if self.__detail:
             print("Link time:\n%s" % link_time)
             print("Path flow:\n%s" % path_flow)
@@ -322,7 +426,7 @@ class TrafficFlowModel:
             the following function:
                 t = t0 * (1 + alpha * (flow / capacity))^beta
         '''
-        value = t0 * (1 + self._alpha * ((link_flow/capacity)**self._beta))
+        value = t0 * (1 + self._alpha * ((link_flow/capacity)**self._beta)) + np.random.normal(0, t0/3)
         return value
 
     def __link_time_performance_integrated(self, link_flow, t0, capacity):
@@ -467,6 +571,22 @@ class TrafficFlowModel:
             return True
         else:
             return False
+
+    def unif_assign(self):
+        #print(self.__network.num_of_paths())
+        assigned_flow = np.zeros(self.__network.num_of_paths()) 
+        for OD_pair_index in range(self.__network.num_of_OD_pairs()):
+            indice_grouped = []
+            for path_index in range(self.__network.num_of_paths()):
+                if self.__network.paths_category()[path_index] == OD_pair_index:
+                    indice_grouped.append(path_index)
+            
+            assigned_flow[indice_grouped] = self.__demand[OD_pair_index]/len(indice_grouped)
+            #print(len(indice_grouped))
+            #print(assigned_flow)
+            link_flow = self.__path_flow_to_link_flow(assigned_flow)
+        return assigned_flow, link_flow
+
     
     def disp_detail(self):
         ''' Display all the numerical details of each variable
@@ -479,6 +599,7 @@ class TrafficFlowModel:
             the digit of numerical component in arrays.
         '''
         np.set_printoptions(precision= precision)
+
 
     def __dash_line(self):
         ''' Return a string which consistently 
