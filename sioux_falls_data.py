@@ -40,13 +40,45 @@ def import_matrix(matfile):
 
 class Net:
     def __init__(self):
-        self.net = pd.read_csv('sfdata/SiouxFalls_net.tntp', skiprows=8, sep='\t').drop(['~', ';'], axis =1)
+        # Read the file with proper handling of the tab-delimited format
+        # The file has leading tabs and trailing semicolons that need to be handled
+        with open('sfdata/SiouxFalls_net.tntp', 'r') as f:
+            lines = f.readlines()[8:]  # Skip first 8 lines
+
+        # Parse header and data
+        header_line = lines[0].strip().strip('~').strip()
+        header = [col.strip() for col in header_line.split('\t') if col.strip() and col.strip() != ';']
+
+        # Parse data lines
+        data_rows = []
+        for line in lines[1:]:
+            line = line.strip()
+            if line:
+                values = [val.strip() for val in line.split('\t') if val.strip() and val.strip() != ';']
+                if values:
+                    data_rows.append(values)
+
+        self.net = pd.DataFrame(data_rows, columns=header)
+        # Convert numeric columns
+        for col in ['capacity', 'length', 'free_flow_time', 'b', 'power', 'speed', 'toll', 'link_type']:
+            if col in self.net.columns:
+                self.net[col] = pd.to_numeric(self.net[col], errors='coerce')
+        for col in ['init_node', 'term_node']:
+            if col in self.net.columns:
+                self.net[col] = pd.to_numeric(self.net[col], errors='coerce').astype(int)
+
         self.net['edge'] = self.net.index+1
 
 
-        self.flow = pd.read_csv('sfdata/SiouxFalls_flow.tntp',sep='\t').drop(['From ', 'To '],axis=1)
+        self.flow = pd.read_csv('sfdata/SiouxFalls_flow.tntp',sep='\t')
+        cols_to_drop = [col for col in ['From ', 'To '] if col in self.flow.columns]
+        if cols_to_drop:
+            self.flow = self.flow.drop(cols_to_drop, axis=1)
         self.flow.rename(columns={"Volume ": "flow", "Cost ": "cost"},inplace=True)
-        self.node_coord = pd.read_csv('sfdata/SiouxFalls_node.tntp',sep='\t').drop([';'], axis=1) # Actual Sioux Falls coordinate
+
+        self.node_coord = pd.read_csv('sfdata/SiouxFalls_node.tntp',sep='\t')
+        if ';' in self.node_coord.columns:
+            self.node_coord = self.node_coord.drop([';'], axis=1) # Actual Sioux Falls coordinate
         self.node_xy = pd.read_csv('sfdata/SiouxFalls_node_xy.tntp',sep='\t') # X,Y position for good visualization
 
 
@@ -61,7 +93,9 @@ class Net:
         self.pos_xy = dict([(i,(a,b)) for i, a,b in zip(self.node_xy.Node, self.node_xy.X, self.node_xy.Y)])
 
 
-        self.nodes = pd.read_csv('sfdata/SiouxFalls_node.tntp',sep='\t').drop([';'], axis=1)
+        self.nodes = pd.read_csv('sfdata/SiouxFalls_node.tntp',sep='\t')
+        if ';' in self.nodes.columns:
+            self.nodes = self.nodes.drop([';'], axis=1)
 
         self.graph = [(str(n), [str(nbr) for nbr in nbrdict]) for n, nbrdict in self.G.adjacency()]
         self.free_time = []

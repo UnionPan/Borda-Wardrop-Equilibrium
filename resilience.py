@@ -47,12 +47,10 @@ class Resilience:
         
 if __name__ == "__main__": 
     sfnet = Net()
-    #print(np.random.normal(0, 5))
+    
 
     simu = Resilience(sfnet, True)
-    #print(simu.od_demand, simu.total_demand)
-    #print(simu.od_demand)
-    #simu.__detail = True
+    
     data = []
     nolearning = []
     flowmd, flowgreed = [], []
@@ -86,7 +84,7 @@ if __name__ == "__main__":
     ax1.grid()
     t2 = np.arange(len(dismd))
     ax2.plot(t2, dismd, lw=2,  label='MD', color='green', ls='-')
-    ax2.plot(t2, disgreed, lw=2,  label='Greedy', color='yellow', ls='--')
+    ax2.plot(t2, disgreed, lw=2,  label='Greedy', color='purple', ls='--')
     ax2.grid()
     ax2.set_xlabel('num steps $t$')
     ax2.set_ylabel(r' $d(\mu^t, \mu^*)$ (logarithmic)')
@@ -109,7 +107,6 @@ if __name__ == "__main__":
     lower_bound = mu + sigma
     upper_bound = mu - sigma
 
-    np.log()
 
     avg = np.mean(nolearning, axis=0)
     std = np.std(data, axis=0)

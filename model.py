@@ -24,11 +24,9 @@ class TrafficFlowModel:
         self._beta = 4 
 
         # Convergent criterion
-<<<<<<< HEAD
+
         self._conv_accuracy = 3e-3
-=======
-        self._conv_accuracy = 1e-8
->>>>>>> 981e6a6 (debug)
+
 
         # Boolean varible: If true print the detail while iterations
         self.__detail = False
@@ -48,9 +46,14 @@ class TrafficFlowModel:
         self.__so_iterations_times = None
 
         #stealthy modification parameter from the attacker
-        self.theta = theta
-        self.d = d
-
+        if theta is None:
+            self.theta = np.eye(self.__network.num_of_links())
+        else:
+            self.theta = theta
+        if d is None:
+            self.d = np.eye(len(self.__demand))
+        else:
+            self.d = d
 
         #self.so_max_iter = 30
         
@@ -364,14 +367,11 @@ class TrafficFlowModel:
             min_in_group = min(sub_path_time)
             ind_min = sub_path_time.index(min_in_group)
             target_path_ind = indice_grouped[ind_min]
-<<<<<<< HEAD
+
             path_flow[target_path_ind] = self.__demand[OD_pair_index]
             #path_flow[target_path_ind] = sum(self.__demand) * self.d[OD_pair_index]
             path_flow[target_path_ind] = self.d.dot(self.__demand)[OD_pair_index] 
-=======
-            path_flow[target_path_ind] = self.__demand[OD_pair_index] 
-            #path_flow[target_path_ind] = sum(self.__demand) * self.d[OD_pair_index]
->>>>>>> 981e6a6 (debug)
+
         if self.__detail:
             print("Link time:\n%s" % link_time)
             print("Path flow:\n%s" % path_flow)
