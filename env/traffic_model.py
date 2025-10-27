@@ -188,7 +188,8 @@ class AtomicTrafficEnvironment(NonAtomicTrafficEnvironment):
                  background_ratio: float = 0.8,
                  alpha: float = 0.15,
                  beta: float = 4.0,
-                 max_paths_per_od: Optional[int] = 10):
+                 max_paths_per_od: Optional[int] = 10,
+                 random_state: Optional[int | np.random.Generator] = None):
         """
         Initialize population-based atomic environment.
 
@@ -202,6 +203,8 @@ class AtomicTrafficEnvironment(NonAtomicTrafficEnvironment):
             Fraction of OD demand treated as fixed background flow
         alpha, beta : float
             BPR parameters
+        random_state : int or np.random.Generator, optional
+            Seed or RNG used for stochastic sampling of strategic agents.
         """
         super().__init__(network_path, network_name, alpha, beta, max_paths_per_od)
 
@@ -209,6 +212,10 @@ class AtomicTrafficEnvironment(NonAtomicTrafficEnvironment):
             raise ValueError("background_ratio must lie in [0, 1).")
 
         self.background_ratio = background_ratio
+        if isinstance(random_state, np.random.Generator):
+            self.rng = random_state
+        else:
+            self.rng = np.random.default_rng(random_state)
 
         # Preserve original demand data
         self.total_demand = float(np.sum(self.demands))
@@ -291,20 +298,25 @@ class AtomicTrafficEnvironment(NonAtomicTrafficEnvironment):
             strategic_flow[path_indices] = demand / path_indices.size
         return strategic_flow
 
-    def flow_from_distribution(self, path_probabilities: np.ndarray) -> np.ndarray:
+    def flow_from_distribution(self,
+                               path_probabilities: np.ndarray,
+                               rng: Optional[np.random.Generator] = None) -> np.ndarray:
         """
-        Convert per-path probabilities into strategic flow.
+        Sample discrete strategic agents from per-path probabilities.
 
         Parameters
         ----------
         path_probabilities : np.ndarray
             Probabilities for each path. For every OD pair, the probabilities
             on its paths must sum to 1 (or 0 if the strategic demand is zero).
+        rng : np.random.Generator, optional
+            RNG to use for sampling. Defaults to the environment's generator.
         """
         path_probabilities = np.asarray(path_probabilities, dtype=float)
         if path_probabilities.shape[0] != self.num_paths:
             raise ValueError("Probability vector must match number of paths.")
 
+        rng = rng or self.rng
         strategic_flow = np.zeros(self.num_paths, dtype=float)
         for od_idx, path_indices in enumerate(self.od_path_indices):
             demand = float(self.strategic_demand[od_idx])
@@ -312,9 +324,21 @@ class AtomicTrafficEnvironment(NonAtomicTrafficEnvironment):
                 continue
             probs = path_probabilities[path_indices]
             prob_sum = probs.sum()
-            if prob_sum > 0:
+            if prob_sum <= 0:
+                probs = np.ones_like(probs) / probs.size
+            else:
                 probs = probs / prob_sum
-            strategic_flow[path_indices] = demand * probs
+
+            # Decompose into integer agents plus a fractional component handled stochastically.
+            base_agents = int(np.floor(demand + 1e-9))
+            fractional = max(demand - base_agents, 0.0)
+            extra_agent = 1 if fractional > 0 and rng.random() < fractional else 0
+            total_agents = base_agents + extra_agent
+            if total_agents == 0:
+                continue
+
+            counts = rng.multinomial(total_agents, probs)
+            strategic_flow[path_indices] = counts.astype(float)
 
         return strategic_flow
 

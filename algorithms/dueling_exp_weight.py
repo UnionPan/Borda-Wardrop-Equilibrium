@@ -63,7 +63,10 @@ class DuelingExpWeight(NonAtomicAlgorithm):
         self.temperature = max(float(temperature), 1e-8)
         self.duels_per_iteration = max(int(duels_per_iteration), 1)
         self.tolerance = tolerance
-        self.rng = random_state or np.random.default_rng()
+        if isinstance(random_state, np.random.Generator):
+            self.rng = random_state
+        else:
+            self.rng = np.random.default_rng(random_state)
 
         # Cache OD metadata for fast vectorised access.
         paths_category = self.env.traffic_network.paths_category()

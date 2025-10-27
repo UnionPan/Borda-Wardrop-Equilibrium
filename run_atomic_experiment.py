@@ -26,8 +26,8 @@ def run_and_plot(algorithm, title_suffix: str, save_suffix: str):
 
 def main():
     """Main function to run the population-level atomic experiment."""
-    network_path = "./networks/Braess-Example"
-    background_ratio = 0.5
+    network_path = "./networks/SiouxFalls"
+    background_ratio = 0.7
 
     # ExpWeight dynamics (Adam style) for strategic populations
     try:
@@ -40,7 +40,7 @@ def main():
         return
 
     exp_algo = AtomicExpWeight(env_exp, max_iterations=100, learning_rate=0.05)
-    run_and_plot(exp_algo, "Braess-Example", "braess")
+    run_and_plot(exp_algo, "SiouxFall-Example", "SiouxFalls")
 
     # Frank-Wolfe on the same environment class (new instance for a clean slate)
     try:
@@ -53,7 +53,7 @@ def main():
         return
 
     fw_algo = AtomicFrankWolfe(env_fw, max_iterations=100, tolerance=1e-4)
-    run_and_plot(fw_algo, "Braess-Example", "braess")
+    run_and_plot(fw_algo, "SiouxFall-Example", "SiouxFalls")
 
 
 if __name__ == "__main__":
